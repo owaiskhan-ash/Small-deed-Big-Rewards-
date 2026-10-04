@@ -16,3 +16,7 @@
 local.properties
 .env
 debug.keystore
+
+# Python bytecode from tools/ (regenerated on every run)
+__pycache__/
+*.py[cod]
