@@ -1,5 +1,6 @@
 package com.example.ui.theme
 
+import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -8,7 +9,10 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowInsetsControllerCompat
 
 import androidx.compose.ui.graphics.Color
 
@@ -79,6 +83,21 @@ fun MyApplicationTheme(
       darkTheme -> DarkColorScheme
       else -> LightColorScheme
     }
+
+  // The XML theme can only guess the status-bar glyph colour from the *system*
+  // theme. Because this app lets the user force light / dark / white
+  // independently, re-apply the correct appearance whenever the resolved theme
+  // changes so dark glyphs never sit on the near-black background (or vice
+  // versa).
+  val view = LocalView.current
+  if (!view.isInEditMode) {
+    SideEffect {
+      val window = (view.context as? Activity)?.window
+      if (window != null) {
+        WindowInsetsControllerCompat(window, view).isAppearanceLightStatusBars = !darkTheme
+      }
+    }
+  }
 
   MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
 }

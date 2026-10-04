@@ -2,10 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Haptics for the practice counter and favourite toggle. -->
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only needed to post the daily-hadith reminder on Android 13+. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- WorkManager re-arms the daily reminder across reboots. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- NOTE: android.permission.INTERNET was removed on 2026-10-04. No
+         production code path opens a socket; keeping it would force a Play
+         Console data-safety declaration for a capability the app does not have. -->
 
     <application
         android:name=".MyApplication"
@@ -17,10 +22,17 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+        <!--
+          singleTop + FLAG_ACTIVITY_SINGLE_TOP (set by DailyHadithWorker) make
+          MainActivity.onNewIntent() fire when a notification is tapped while
+          the task is already in the foreground, instead of tearing the task
+          down and rebuilding it.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.MyApplication">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

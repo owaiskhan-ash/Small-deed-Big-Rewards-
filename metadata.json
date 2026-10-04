@@ -2,5 +2,5 @@
   "name": "Small Deeds, Big Rewards",
   "description": "A beautiful, production-ready personal hadith reading app featuring 100 hadiths organized into 8 chapters.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

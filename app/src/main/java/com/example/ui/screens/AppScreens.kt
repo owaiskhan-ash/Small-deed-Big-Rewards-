@@ -37,7 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
+import com.example.BuildConfig
 import com.example.data.HadithsData
 import com.example.model.Chapter
 import com.example.model.Hadith
@@ -48,8 +48,6 @@ import com.example.ui.components.onSwipeGesture
 import com.example.viewmodel.ActiveScreen
 import com.example.viewmodel.FilterChip
 import com.example.viewmodel.HadithViewModel
-import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
@@ -58,7 +56,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.composed
-import java.util.Calendar
 
 fun Modifier.bounceClick(
     enabled: Boolean = true,
@@ -145,33 +142,26 @@ fun getAccentColor(colorName: String, isDark: Boolean): Color {
     }
 }
 
-fun getChapterColor(chapterId: Int): Color {
-    return when (chapterId) {
-        1 -> Color(0xFF059669) // Emerald
-        2 -> Color(0xFFD97706) // Amber
-        3 -> Color(0xFF4F46E5) // Indigo
-        4 -> Color(0xFFE11D48) // Rose
-        5 -> Color(0xFF0D9488) // Teal
-        6 -> Color(0xFFEA580C) // Orange
-        7 -> Color(0xFF7C3AED) // Purple
-        8 -> Color(0xFF6366F1) // Indigo/Lavender (Provisions of a believer)
-        else -> Color(0xFF059669)
-    }
-}
+// Chapter colour is read straight from HadithsData so the palette declared
+// with the content is the palette that renders -- the previous copy-pasted
+// when(chapterId) table could silently drift from the data.
+fun getChapterColor(chapterId: Int): Color =
+    HadithsData.chapters.firstOrNull { it.id == chapterId }
+        ?.let { Color(it.colorArgb) }
+        ?: Color(0xFF059669)
 
-fun getChapterIcon(chapterId: Int): ImageVector {
-    return when (chapterId) {
-        1 -> Icons.Default.Star        // Prayer
-        2 -> Icons.Default.Favorite    // Dhikr
-        3 -> Icons.AutoMirrored.Filled.List // Quran
-        4 -> Icons.Default.Person      // Ethics
-        5 -> Icons.Default.Info        // Fasting & Charity
-        6 -> Icons.Default.Home        // Daily & Family
-        7 -> Icons.Default.Info        // Knowledge & Gatherings
-        8 -> Icons.Default.Star        // Provisions of a believer
+fun getChapterIcon(chapterId: Int): ImageVector =
+    when (HadithsData.chapters.firstOrNull { it.id == chapterId }?.iconName) {
+        "salah" -> Icons.Default.Star                 // Prayer
+        "dhikr" -> Icons.Default.Favorite             // Dhikr
+        "quran" -> Icons.AutoMirrored.Filled.List     // Quran
+        "ethics" -> Icons.Default.Person              // Ethics
+        "charity" -> Icons.Default.Info               // Fasting & Charity
+        "family" -> Icons.Default.Home                // Daily & Family
+        "knowledge" -> Icons.Default.Info             // Knowledge & Gatherings
+        "final_journey" -> Icons.Default.Star         // Provisions of a believer
         else -> Icons.Default.Star
     }
-}
 
 @Composable
 fun MainScreenContainer(viewModel: HadithViewModel) {
@@ -342,24 +332,15 @@ fun HomeScreen(viewModel: HadithViewModel, activeColor: Color) {
     val lastReadId by viewModel.lastReadId.collectAsState()
     val readHadiths by viewModel.readHadithIds.collectAsState()
     val dailyHadith = remember { viewModel.getDailyHadith() }
+    val currentStreak by viewModel.currentStreak.collectAsState()
 
     val lastOpenedHadith = remember(lastReadId) {
-        HadithsData.hadiths.firstOrNull { it.id == lastReadId } ?: HadithsData.hadiths.firstOrNull() ?: Hadith(
-            id = 1,
-            chapter = 1,
-            chapterName = "The Sanctuary of Prayer",
-            title = "The Radiant Walk",
-            description = "Reward of walking to masjid on Friday",
-            arabicText = "مَنِ اغْتَسَلَ يَوْمَ الجُمُعَةِ وَغَسَّلَ وَبَكَّرَ وَابْتَكَرَ وَدَنَا وَاسْتَمَعَ وَأَنْصَتَ كَانَ لَهُ بِكُلِّ خُطْوَةٍ يَخْطُوهَا أَجْرُ سَنَةٍ صِيَامُهَا وَقِيَامُهَا",
-            translation = "Whoever performs Ghusl on Friday, goes early and arrives early, gets close and listens and is silent — there will be for him in every step he takes the reward of a year of fasting and standing in prayer.",
-            narrator = "Aws bin Aws",
-            reference = "Jami` at-Tirmidhi Hadith 496 | Sahih"
-        )
+        HadithsData.hadithById(lastReadId)
     }
 
     // Calculate dynamic progress
-    val overallProgressText = "${readHadiths.size}/100"
-    val progressFloat = readHadiths.size / 100f
+    val overallProgressText = "${readHadiths.size}/${HadithsData.totalHadiths}"
+    val progressFloat = readHadiths.size / HadithsData.totalHadiths.toFloat()
 
     LazyColumn(
         modifier = Modifier
@@ -395,18 +376,38 @@ fun HomeScreen(viewModel: HadithViewModel, activeColor: Color) {
                             color = activeColor,
                             letterSpacing = 1.5.sp
                         )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(activeColor.copy(alpha = 0.2f))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Hadith ${lastOpenedHadith.id}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = activeColor
-                            )
+                            if (currentStreak > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.White.copy(alpha = 0.12f))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "$currentStreak-day streak",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFA8A29E)
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(activeColor.copy(alpha = 0.2f))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Hadith ${lastOpenedHadith.id}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = activeColor
+                                )
+                            }
                         }
                     }
 
@@ -673,10 +674,15 @@ fun BrowseScreen(viewModel: HadithViewModel, activeColor: Color) {
     val filteredHadiths = remember(searchQuery, filterChip, filterChapterId, favoriteHadiths, readHadiths) {
         HadithsData.hadiths.filter { hadith ->
             // Search Query
-            val matchesSearch = hadith.title.contains(searchQuery, ignoreCase = true) ||
-                    hadith.translation.contains(searchQuery, ignoreCase = true) ||
-                    hadith.narrator.contains(searchQuery, ignoreCase = true) ||
-                    hadith.id.toString() == searchQuery
+            val query = searchQuery.trim()
+            val matchesSearch = query.isEmpty() ||
+                    hadith.title.contains(query, ignoreCase = true) ||
+                    hadith.translation.contains(query, ignoreCase = true) ||
+                    hadith.narrator.contains(query, ignoreCase = true) ||
+                    hadith.description.contains(query, ignoreCase = true) ||
+                    hadith.reference.contains(query, ignoreCase = true) ||
+                    hadith.chapterName.contains(query, ignoreCase = true) ||
+                    hadith.id.toString().startsWith(query)
 
             // Filter Chip
             val matchesChip = when (filterChip) {
@@ -964,22 +970,12 @@ fun HadithDetailScreen(viewModel: HadithViewModel, activeColor: Color) {
     val lineHeightOpt by viewModel.lineHeight.collectAsState()
     val showArabic by viewModel.showArabicEnabled.collectAsState()
     val showNarrator by viewModel.showNarratorEnabled.collectAsState()
-    val isAutoRead = viewModel.autoReadEnabled.collectAsState()
+    val isAutoRead by viewModel.autoReadEnabled.collectAsState()
 
     val context = LocalContext.current
 
     val hadith = remember(activeId) {
-        HadithsData.hadiths.firstOrNull { it.id == activeId } ?: HadithsData.hadiths.firstOrNull() ?: Hadith(
-            id = 1,
-            chapter = 1,
-            chapterName = "The Sanctuary of Prayer",
-            title = "The Radiant Walk",
-            description = "Reward of walking to masjid on Friday",
-            arabicText = "مَنِ اغْتَسَلَ يَوْمَ الجُمُعَةِ وَغَسَّلَ وَبَكَّرَ وَابْتَكَرَ وَدَنَا وَاسْتَمَعَ وَأَنْصَتَ كَانَ لَهُ بِكُلِّ خُطْوَةٍ يَخْطُوهَا أَجْرُ سَنَةٍ صِيَامُهَا وَقِيَامُهَا",
-            translation = "Whoever performs Ghusl on Friday, goes early and arrives early, gets close and listens and is silent — there will be for him in every step he takes the reward of a year of fasting and standing in prayer.",
-            narrator = "Aws bin Aws",
-            reference = "Jami` at-Tirmidhi Hadith 496 | Sahih"
-        )
+        HadithsData.hadithById(activeId)
     }
 
     val isFav = favorites.contains(hadith.id)
@@ -996,8 +992,10 @@ fun HadithDetailScreen(viewModel: HadithViewModel, activeColor: Color) {
     )
 
     // Automatically mark read if option enabled on display
-    LaunchedEffect(hadith.id) {
-        if (isAutoRead.value) {
+    // Keyed on both the hadith and the setting so switching auto-read on while
+    // a hadith is open marks it immediately, rather than only on next open.
+    LaunchedEffect(hadith.id, isAutoRead) {
+        if (isAutoRead) {
             viewModel.markAsRead(hadith.id)
         }
     }
@@ -1016,7 +1014,7 @@ fun HadithDetailScreen(viewModel: HadithViewModel, activeColor: Color) {
             .background(MaterialTheme.colorScheme.background)
             .onSwipeGesture(
                 onSwipeLeft = {
-                    if (hadith.id < 100) {
+                    if (hadith.id < HadithsData.totalHadiths) {
                         viewModel.navigateTo(ActiveScreen.HADITH_DETAIL, detailId = hadith.id + 1)
                     }
                 },
@@ -1040,7 +1038,7 @@ fun HadithDetailScreen(viewModel: HadithViewModel, activeColor: Color) {
             }
             Spacer(modifier = Modifier.weight(1f))
             Text(
-                text = "${hadith.id} / 100",
+                text = "${hadith.id} / ${HadithsData.totalHadiths}",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
             Spacer(modifier = Modifier.weight(1f))
@@ -1274,11 +1272,11 @@ fun HadithDetailScreen(viewModel: HadithViewModel, activeColor: Color) {
 
             TextButton(
                 onClick = {
-                    if (hadith.id < 100) {
+                    if (hadith.id < HadithsData.totalHadiths) {
                         viewModel.navigateTo(ActiveScreen.HADITH_DETAIL, detailId = hadith.id + 1)
                     }
                 },
-                enabled = hadith.id < 100
+                enabled = hadith.id < HadithsData.totalHadiths
             ) {
                 Text("Next", fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.width(6.dp))
@@ -1509,7 +1507,7 @@ fun ChapterViewScreen(viewModel: HadithViewModel, activeColor: Color) {
     val readHadiths by viewModel.readHadithIds.collectAsState()
 
     val chapter = remember(chapterId) {
-        HadithsData.chapters.firstOrNull { it.id == chapterId } ?: HadithsData.chapters.firstOrNull() ?: Chapter(1, "The Sanctuary of Prayer", "Salah & Purity", 1..18, "0xFF059669", "salah")
+        HadithsData.chapterById(chapterId)
     }
 
     val chapterColor = getChapterColor(chapter.id)
@@ -1753,6 +1751,8 @@ fun SettingsScreen(viewModel: HadithViewModel, activeColor: Color) {
     var isProgressExpanded by remember { mutableStateOf(false) }
 
     val overallTotal = readHadiths.size
+    val overallPercent =
+        if (HadithsData.totalHadiths > 0) (overallTotal * 100) / HadithsData.totalHadiths else 0
 
     val context = LocalContext.current
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -1814,7 +1814,7 @@ fun SettingsScreen(viewModel: HadithViewModel, activeColor: Color) {
                         
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "$overallTotal%",
+                                text = "$overallPercent%",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 color = activeColor,
@@ -1847,7 +1847,7 @@ fun SettingsScreen(viewModel: HadithViewModel, activeColor: Color) {
                                 modifier = Modifier.size(110.dp)
                             ) {
                                 CircularProgressIndicator(
-                                    progress = { overallTotal / 100f },
+                                    progress = { overallTotal / HadithsData.totalHadiths.toFloat() },
                                     modifier = Modifier.fillMaxSize(),
                                     strokeWidth = 10.dp,
                                     color = activeColor,
@@ -1855,11 +1855,11 @@ fun SettingsScreen(viewModel: HadithViewModel, activeColor: Color) {
                                 )
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
-                                        text = "$overallTotal%",
+                                        text = "$overallPercent%",
                                         style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
                                     )
                                     Text(
-                                        text = "$overallTotal / 100",
+                                        text = "$overallTotal / ${HadithsData.totalHadiths}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                     )
@@ -2307,7 +2307,7 @@ fun SettingsScreen(viewModel: HadithViewModel, activeColor: Color) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Small Deeds, Big Rewards v1.0.0",
+                    text = "Small Deeds, Big Rewards ${BuildConfig.VERSION_NAME}",
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)

@@ -2,6 +2,7 @@ package com.example.data
 
 import com.example.model.Chapter
 import com.example.model.Hadith
+import java.util.Calendar
 
 object HadithsData {
     val chapters = listOf(
@@ -1117,4 +1118,43 @@ object HadithsData {
             reference = "Sunan Abi Dawud 1529 (Graded as authentic (Saheeh) by Shaykh al-Albani)"
         )
     )
+
+    val totalHadiths: Int
+        get() = hadiths.size
+
+    /**
+     * A safe stand-in used whenever a lookup cannot resolve (empty dataset,
+     * unknown id, ...). Kept here so there is exactly one copy of it instead of
+     * the four that used to be scattered across the ViewModel and the UI.
+     */
+    val fallbackHadith: Hadith = Hadith(
+        id = 1,
+        chapter = 1,
+        chapterName = "The Sanctuary of Prayer",
+        title = "The Radiant Walk",
+        description = "Reward of walking to masjid on Friday",
+        arabicText = "مَنِ اغْتَسَلَ يَوْمَ الجُمُعَةِ وَغَسَّلَ وَبَكَّرَ وَابْتَكَرَ وَدَنَا وَاسْتَمَعَ وَأَنْصَتَ كَانَ لَهُ بِكُلِّ خُطْوَةٍ يَخْطُوهَا أَجْرُ سَنَةٍ صِيَامُهَا وَقِيَامُهَا",
+        translation = "Whoever performs Ghusl on Friday, goes early and arrives early, gets close and listens and is silent — there will be for him in every step he takes the reward of a year of fasting and standing in prayer.",
+        narrator = "Aws bin Aws",
+        reference = "Jami` at-Tirmidhi Hadith 496 | Sahih"
+    )
+
+    /**
+     * The single source of truth for "today's hadith".
+     *
+     * Seeded by the calendar day so the Home *Daily Insight* card and the 8:00
+     * AM notification always agree (they previously picked independently, so
+     * the reminder advertised a different hadith than the app showed).
+     */
+    fun hadithForDay(calendar: Calendar = Calendar.getInstance()): Hadith {
+        if (hadiths.isEmpty()) return fallbackHadith
+        val seed = calendar.get(Calendar.YEAR).toLong() * 1000L + calendar.get(Calendar.DAY_OF_YEAR)
+        return hadiths[kotlin.random.Random(seed).nextInt(hadiths.size)]
+    }
+
+    fun hadithById(id: Int): Hadith =
+        hadiths.firstOrNull { it.id == id } ?: hadiths.firstOrNull() ?: fallbackHadith
+
+    fun chapterById(id: Int?): Chapter =
+        chapters.firstOrNull { it.id == id } ?: chapters.firstOrNull() ?: chapters.first()
 }

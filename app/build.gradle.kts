@@ -1,12 +1,17 @@
 import java.util.Base64
 
+// ---------------------------------------------------------------------------
+// Keystore bootstrap.
+//
+// CI may publish `debug.keystore.base64` as a secret; if so, materialise the
+// keystore once. Neither file is ever committed (see .gitignore).
+// ---------------------------------------------------------------------------
 val base64File = file("${rootDir}/debug.keystore.base64")
 val keystoreFile = file("${rootDir}/debug.keystore")
 if (base64File.exists() && !keystoreFile.exists()) {
     try {
         val base64Text = base64File.readText().replace("\\s".toRegex(), "")
-        val decodedBytes = Base64.getDecoder().decode(base64Text)
-        keystoreFile.writeBytes(decodedBytes)
+        keystoreFile.writeBytes(Base64.getDecoder().decode(base64Text))
     } catch (e: Exception) {
         println("Keystore decode error: ${e.message}")
     }
@@ -15,9 +20,7 @@ if (base64File.exists() && !keystoreFile.exists()) {
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
-  // alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
-  alias(libs.plugins.secrets)
 }
 
 android {
@@ -28,33 +31,50 @@ android {
     applicationId = "com.aistudio.smalldeeds.kfkjqo"
     minSdk = 24
     targetSdk = 36
-    versionCode = 6
-    versionName = "6.0"
+    versionCode = 7
+    versionName = "7.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  // -------------------------------------------------------------------------
+  // Signing.
+  //
+  //  release : uses the real upload keystore when KEYSTORE_PATH + the two
+  //            password env vars are present; falls back to a decoded
+  //            debug.keystore (loudly warned) for legacy CI; otherwise leaves
+  //            the artefact UNSIGNED so Play App Signing can sign it, instead
+  //            of failing the build outright on a clean checkout.
+  //  debug   : AGP's built-in debug config, which auto-creates
+  //            ~/.android/debug.keystore. No committed keystore required.
+  // -------------------------------------------------------------------------
+  val uploadKeystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+  val uploadKeystore = file(uploadKeystorePath)
+  val storePassword = System.getenv("STORE_PASSWORD")
+  val keyPassword = System.getenv("KEY_PASSWORD")
+  val haveUploadCredentials = uploadKeystore.exists() && storePassword != null && keyPassword != null
+  val haveFallbackKeystore = keystoreFile.exists()
+
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      val uploadKeyFile = file(keystorePath)
-      if (uploadKeyFile.exists()) {
-        storeFile = uploadKeyFile
-        storePassword = System.getenv("STORE_PASSWORD")
+    if (haveUploadCredentials) {
+      create("release") {
+        storeFile = uploadKeystore
+        storePassword = storePassword
         keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
-        keyPassword = System.getenv("KEY_PASSWORD")
-      } else {
-        storeFile = file("${rootDir}/debug.keystore")
+        keyPassword = keyPassword
+      }
+    } else if (haveFallbackKeystore) {
+      logger.warn(
+        "No upload keystore/credentials found; signing 'release' with the debug " +
+          "keystore at $uploadKeystorePath. This is for CI smoke builds only and " +
+          "will be rejected by Google Play."
+      )
+      create("release") {
+        storeFile = keystoreFile
         storePassword = "android"
         keyAlias = "androiddebugkey"
         keyPassword = "android"
       }
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
     }
   }
 
@@ -64,28 +84,47 @@ android {
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      // Null when no keystore is configured => unsigned AAB, sign later.
+      signingConfig = signingConfigs.findByName("release")
+      if (signingConfig == null) {
+        logger.lifecycle(
+          "Release build will be UNSIGNED: provide KEYSTORE_PATH, STORE_PASSWORD, " +
+            "KEY_ALIAS and KEY_PASSWORD (or drop my-upload-key.jks next to " +
+            "settings.gradle.kts) to produce a signed artefact."
+        )
+      }
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      // Intentionally no signingConfig: AGP applies its own debug signing and
+      // generates ~/.android/debug.keystore on demand.
     }
   }
   compileOptions {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
   }
   buildFeatures {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
-}
-
-// Configure the Secrets Gradle Plugin to use .env and .env.example files
-// to match the convention used in Web projects.
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      // Let CI opt into Roborazzi screenshot verification / comparison without
+      // the default record mode overwriting the committed golden images:
+      //   ./gradlew test -Droborazzi.test.verify=true
+      all {
+        systemProperty(
+          "roborazzi.test.verify",
+          providers.systemProperty("roborazzi.test.verify").getOrElse("false"),
+        )
+        systemProperty(
+          "roborazzi.test.compare",
+          providers.systemProperty("roborazzi.test.compare").getOrElse("false"),
+        )
+      }
+    }
+  }
 }
 
 // Some unused dependencies are commented out below instead of being removed.
@@ -129,6 +168,7 @@ dependencies {
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.androidx.work.testing)
   testImplementation(libs.robolectric)
   testImplementation(libs.roborazzi)
   testImplementation(libs.roborazzi.compose)
@@ -143,5 +183,3 @@ dependencies {
   // "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
 }
-
-
