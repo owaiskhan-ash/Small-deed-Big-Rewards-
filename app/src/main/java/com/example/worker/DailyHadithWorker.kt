@@ -19,34 +19,29 @@ import com.example.data.HadithsData
 import com.example.model.Hadith
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
-import kotlin.random.Random
 
+/**
+ * Posts the daily-hadith reminder.
+ *
+ * The hadith is chosen by [HadithsData.hadithForDay], the same seeded,
+ * day-deterministic selection the Home screen's *Daily Insight* card uses, so
+ * the notification and the app always agree.
+ */
 class DailyHadithWorker(
-    private val context: Context,
+    context: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
         return try {
-            val hadiths = HadithsData.hadiths
-            if (hadiths.isNotEmpty()) {
-                val randomIndex = Random.nextInt(hadiths.size)
-                val hadith = hadiths[randomIndex]
-                sendHadithNotification(hadith)
+            if (HadithsData.hadiths.isNotEmpty()) {
+                sendNotification(applicationContext, HadithsData.hadithForDay())
             }
             Result.success()
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error showing daily hadith notification", e)
             Result.retry()
         }
-    }
-
-    private fun sendHadithNotification(hadith: Hadith) {
-        sendNotification(context, hadith)
-    }
-
-    private fun createNotificationChannelIfNeeded() {
-        createChannel(context)
     }
 
     companion object {
@@ -79,7 +74,13 @@ class DailyHadithWorker(
             createChannel(context)
 
             val intent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                // NEW_TASK + CLEAR_TOP reach the existing task; SINGLE_TOP (with
+                // the matching launchMode in the manifest) delivers to the live
+                // instance via onNewIntent instead of rebuilding the whole task,
+                // which preserves the user's navigation state.
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra(EXTRA_HADITH_ID, hadith.id)
             }
 
@@ -100,11 +101,8 @@ class DailyHadithWorker(
             val contentText = hadith.description.ifEmpty { hadith.chapterName }
             val bigText = "\"${hadith.translation}\"\n\n— ${hadith.reference}"
 
-            // Fallback icon check
-            val iconResId = R.drawable.ic_stat_hadith
-
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(iconResId)
+                .setSmallIcon(R.drawable.ic_stat_hadith)
                 .setContentTitle(title)
                 .setContentText(contentText)
                 .setStyle(
@@ -142,6 +140,12 @@ class DailyHadithWorker(
 
         /**
          * Schedules a 24-hour periodic work request to trigger daily around 8:00 AM.
+         *
+         * Uses [ExistingPeriodicWorkPolicy.KEEP] on purpose: the caller computes a
+         * fresh `initialDelay` to the next 08:00 on every invocation, so an UPDATE
+         * policy would reset the countdown each time the app was opened and could
+         * push the reminder out indefinitely for engaged users. KEEP leaves an
+         * already-armed period untouched and only enqueues when nothing exists.
          */
         fun scheduleDailyNotification(context: Context, targetHour: Int = 8, targetMinute: Int = 0) {
             val now = Calendar.getInstance()
@@ -169,7 +173,7 @@ class DailyHadithWorker(
             try {
                 WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                     WORK_NAME,
-                    ExistingPeriodicWorkPolicy.UPDATE,
+                    ExistingPeriodicWorkPolicy.KEEP,
                     dailyWorkRequest
                 )
             } catch (e: Exception) {
@@ -189,14 +193,14 @@ class DailyHadithWorker(
         }
 
         /**
-         * Triggers an immediate notification directly and via WorkManager.
+         * Triggers an immediate notification for the "Send Test Notification"
+         * button. Shows today's hadith so the preview matches what the scheduled
+         * reminder will say.
          */
         fun triggerImmediateNotification(context: Context) {
             try {
-                val hadiths = HadithsData.hadiths
-                if (hadiths.isNotEmpty()) {
-                    val hadith = hadiths.random()
-                    sendNotification(context, hadith)
+                if (HadithsData.hadiths.isNotEmpty()) {
+                    sendNotification(context, HadithsData.hadithForDay())
                 }
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Direct notification trigger failed: ${e.message}", e)

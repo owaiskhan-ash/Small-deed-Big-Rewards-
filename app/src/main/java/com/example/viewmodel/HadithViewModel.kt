@@ -2,6 +2,10 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.HadithsData
@@ -12,7 +16,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Calendar
-import java.util.Random
 
 enum class ActiveScreen {
     HOME,
@@ -30,6 +33,11 @@ enum class FilterChip {
 }
 
 class HadithViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        /** Duration of the UI tick produced by [triggerHaptic]. */
+        private const val HAPTIC_MILLIS = 15L
+    }
 
     private val prefs = try {
         application.getSharedPreferences("smdr_prefs", Context.MODE_PRIVATE)
@@ -131,9 +139,6 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
     private val _currentStreak = MutableStateFlow(0)
     val currentStreak: StateFlow<Int> = _currentStreak.asStateFlow()
 
-    private val _weeklyActivity = MutableStateFlow<Set<Int>>(emptySet())
-    val weeklyActivity: StateFlow<Set<Int>> = _weeklyActivity.asStateFlow()
-
     private val _totalCompletionsMap = MutableStateFlow<Map<Int, Int>>(emptyMap())
     val totalCompletionsMap: StateFlow<Map<Int, Int>> = _totalCompletionsMap.asStateFlow()
 
@@ -158,11 +163,8 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
                 _autoReadEnabled.value = safePrefRead(true) { prefs?.getBoolean("smdr_auto_read", true) ?: true }
                 _showArabicEnabled.value = safePrefRead(true) { prefs?.getBoolean("smdr_show_arabic", true) ?: true }
                 _showNarratorEnabled.value = safePrefRead(true) { prefs?.getBoolean("smdr_show_narrator", true) ?: true }
-                val notifEnabled = safePrefRead(true) { prefs?.getBoolean("smdr_daily_notif", true) ?: true }
-                _dailyNotificationsEnabled.value = notifEnabled
-                if (notifEnabled) {
-                    com.example.worker.DailyHadithWorker.scheduleDailyNotification(getApplication())
-                }
+                _dailyNotificationsEnabled.value =
+                    safePrefRead(true) { prefs?.getBoolean("smdr_daily_notif", true) ?: true }
                 
                 _lastReadId.value = safePrefRead(1) { prefs?.getInt("smdr_last_read", 1) ?: 1 }
 
@@ -176,7 +178,6 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
                 _readHadithIds.value = emptySet()
                 _favoriteHadithIds.value = emptySet()
                 _currentStreak.value = 0
-                _weeklyActivity.value = emptySet()
                 _totalCompletionsMap.value = emptyMap()
             }
         }
@@ -347,111 +348,95 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
         _lastReadId.value = 1
         _detailHadithId.value = 1
         _currentStreak.value = 0
-        _weeklyActivity.value = emptySet()
         _totalCompletionsMap.value = emptyMap()
 
         saveIntSet("smdr_read_hadiths", emptySet())
         saveIntSet("smdr_favorites", emptySet())
-        saveIntSet("smdr_weekly_activity", emptySet())
         saveCompletionsMap(emptyMap())
 
         safeEdit { editor ->
             editor.putInt("smdr_last_read", 1)
             editor.putInt("smdr_streak", 0)
             editor.putLong("smdr_last_read_day", -1L)
-            for (id in 1..100) {
+            for (id in 1..HadithsData.totalHadiths) {
                 editor.remove("smdr_session_count_$id")
                 editor.remove("smdr_session_target_index_$id")
             }
         }
     }
 
-    // Seeded Daily Hadith
-    fun getDailyHadith(): Hadith {
-        val calendar = Calendar.getInstance()
-        val dayOfYear = calendar.get(Calendar.DAY_OF_YEAR)
-        val year = calendar.get(Calendar.YEAR)
-        // seed with day + year to keep it robust and change daily
-        val seed = (year * 1000 + dayOfYear).toLong()
-        val random = Random(seed)
-        val list = HadithsData.hadiths
-        if (list.isEmpty()) {
-            return Hadith(
-                id = 1,
-                chapter = 1,
-                chapterName = "The Sanctuary of Prayer",
-                title = "The Radiant Walk",
-                description = "Reward of walking to masjid on Friday",
-                arabicText = "مَنِ اغْتَسَلَ يَوْمَ الجُمُعَةِ وَغَسَّلَ وَبَكَّرَ وَابْتَكَرَ وَدَنَا وَاسْتَمَعَ وَأَنْصَتَ كَانَ لَهُ بِكُلِّ خُطْوَةٍ يَخْطُوهَا أَجْرُ سَنَةٍ صِيَامُهَا وَقِيَامُهَا",
-                translation = "Whoever performs Ghusl on Friday, goes early and arrives early, gets close and listens and is silent — there will be for him in every step he takes the reward of a year of fasting and standing in prayer.",
-                narrator = "Aws bin Aws",
-                reference = "Jami` at-Tirmidhi Hadith 496 | Sahih"
-            )
-        }
-        val index = random.nextInt(list.size)
-        return list[index]
+    // Seeded Daily Hadith. Delegates to the single shared selection in
+    // HadithsData so the notification and the Home card can never disagree.
+    fun getDailyHadith(): Hadith = HadithsData.hadithForDay()
+
+    /**
+     * Consecutive day number in the **user's local timezone** (days since
+     * 1970-01-01 as observed locally).
+     *
+     * The previous implementation divided epoch millis by 86,400,000, which is
+     * a *UTC* day index: for anyone off UTC the "day" rolled over at the wrong
+     * local hour, so streaks broke or mis-credited. Deriving the number from
+     * the local calendar date (via the days-from-civil algorithm) is exact,
+     * monotonic and consecutive across day, month, year and DST boundaries.
+     */
+    private fun localDayNumber(): Long {
+        val cal = Calendar.getInstance()
+        return daysFromCivil(
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH) + 1,
+            cal.get(Calendar.DAY_OF_MONTH),
+        )
     }
 
-    // Daily activity recording for streaks (Feature 5)
+    /** Howard Hinnant's days-from-civil; exact Gregorian day ordinal. */
+    private fun daysFromCivil(year: Int, month: Int, day: Int): Long {
+        val y = if (month <= 2) year - 1 else year
+        val era = Math.floorDiv(y, 400)
+        val yoe = y - era * 400
+        val mp = if (month > 2) month - 3 else month + 9
+        val doy = (153 * mp + 2) / 5 + day - 1
+        val doe = yoe * 365L + yoe / 4 - yoe / 100 + doy
+        return era * 146097L + doe - 719468L
+    }
+
+    // Daily activity recording for streaks.
     fun recordActivityForToday() {
-        val todayCalendar = Calendar.getInstance()
-        val todayEpochDay = todayCalendar.timeInMillis / (24L * 60L * 60L * 1000L)
-        
-        val lastEpochDay = safePrefRead(-1L) { prefs?.getLong("smdr_last_read_day", -1L) ?: -1L }
+        val today = localDayNumber()
+
+        val lastDay = safePrefRead(-1L) { prefs?.getLong("smdr_last_read_day", -1L) ?: -1L }
         val streak = safePrefRead(0) { prefs?.getInt("smdr_streak", 0) ?: 0 }
-        
-        val newStreak = when {
-            lastEpochDay == todayEpochDay -> {
-                streak
+
+        when {
+            lastDay == today -> {
+                // Already counted today; the streak is unchanged.
             }
-            lastEpochDay == todayEpochDay - 1 -> {
+            lastDay == today - 1 -> {
                 val updated = streak + 1
                 safeEdit { it.putInt("smdr_streak", updated) }
                 _currentStreak.value = updated
-                updated
             }
             else -> {
                 safeEdit { it.putInt("smdr_streak", 1) }
                 _currentStreak.value = 1
-                1
             }
         }
-        
-        safeEdit { it.putLong("smdr_last_read_day", todayEpochDay) }
-        
-        // Save today's day of the week (1=SUNDAY, 2=MONDAY, ..., 7=SATURDAY)
-        val dayOfWeek = todayCalendar.get(Calendar.DAY_OF_WEEK)
-        val updatedActivity = _weeklyActivity.value.toMutableSet().apply { add(dayOfWeek) }
-        _weeklyActivity.value = updatedActivity
-        saveIntSet("smdr_weekly_activity", updatedActivity)
+
+        safeEdit { it.putLong("smdr_last_read_day", today) }
     }
 
     fun checkAndUpdateStreakOnStartup() {
-        val todayCalendar = Calendar.getInstance()
-        val todayEpochDay = todayCalendar.timeInMillis / (24L * 60L * 60L * 1000L)
-        
-        val lastEpochDay = safePrefRead(-1L) { prefs?.getLong("smdr_last_read_day", -1L) ?: -1L }
-        if (lastEpochDay != -1L) {
-            if (todayEpochDay - lastEpochDay > 1) {
-                // Streak broken!
-                safeEdit { it.putInt("smdr_streak", 0) }
-                _currentStreak.value = 0
-            } else {
-                _currentStreak.value = safePrefRead(0) { prefs?.getInt("smdr_streak", 0) ?: 0 }
-            }
+        val today = localDayNumber()
+
+        val lastDay = safePrefRead(-1L) { prefs?.getLong("smdr_last_read_day", -1L) ?: -1L }
+        if (lastDay != -1L && today - lastDay > 1) {
+            // A whole day was skipped: the streak is broken.
+            safeEdit { it.putInt("smdr_streak", 0) }
+            _currentStreak.value = 0
         } else {
             _currentStreak.value = safePrefRead(0) { prefs?.getInt("smdr_streak", 0) ?: 0 }
         }
-        
-        // Load weekly activity and completions map
-        _weeklyActivity.value = loadIntSet("smdr_weekly_activity")
+
         _totalCompletionsMap.value = loadCompletionsMap()
-        
-        // If more than 7 days have elapsed since last reading activity, clear weekly checkboxes
-        if (lastEpochDay != -1L && todayEpochDay - lastEpochDay >= 7) {
-            _weeklyActivity.value = emptySet()
-            saveIntSet("smdr_weekly_activity", emptySet())
-        }
     }
 
     private fun loadCompletionsMap(): Map<Int, Int> {
@@ -518,12 +503,38 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
         safeEdit { it.putInt("smdr_session_target_index_$hadithId", index) }
     }
 
-    // Perform tiny haptic feedback (15ms vibration)
+    /**
+     * A single short tick of haptic feedback (15 ms), used by taps, toggles and
+     * the practice counter.
+     *
+     * This was previously a logging stub, which left the "Haptic Feedback
+     * (Vibrate)" setting in Settings controlling nothing. It now drives the
+     * system vibrator and honours [hapticEnabled]. Every call is guarded so a
+     * device without a vibrator (or an emulator/headless host) simply no-ops
+     * rather than throwing.
+     */
     fun triggerHaptic() {
-        if (_hapticEnabled.value) {
-            // Safely bypass hardware vibration calls in VM/Cloud streaming environments
-            // to avoid native runtime SIGSEGV crashes on headless systems.
-            android.util.Log.d("HadithViewModel", "Haptic interaction triggered safely")
+        if (!_hapticEnabled.value) return
+        try {
+            val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (getApplication<Application>().getSystemService(Context.VIBRATOR_MANAGER_SERVICE)
+                        as? VibratorManager)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getApplication<Application>().getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+            if (vibrator == null || !vibrator.hasVibrator()) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createOneShot(HAPTIC_MILLIS, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(HAPTIC_MILLIS)
+            }
+        } catch (e: Exception) {
+            // Vibration is a nicety; never let it break an interaction.
+            android.util.Log.w("HadithViewModel", "Haptic feedback unavailable: ${e.message}")
         }
     }
 }
