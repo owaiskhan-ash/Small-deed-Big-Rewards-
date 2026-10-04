@@ -1,14 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!--
-      The window itself is transparent under enableEdgeToEdge(); the light/dark
-      appearance of the status-bar glyphs is driven at runtime by
-      MyApplicationTheme (WindowInsetsControllerCompat) so that a user-forced
-      theme is honoured even when it contradicts the system theme. The values
-      here only set the correct glyph colour for the very first frame, before
-      Compose has drawn.
-    -->
-    <style name="Theme.MyApplication" parent="android:Theme.Material.Light.NoActionBar">
+
+    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>

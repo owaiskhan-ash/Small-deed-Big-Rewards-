@@ -48,55 +48,22 @@ android {
   //  debug   : AGP's built-in debug config, which auto-creates
   //            ~/.android/debug.keystore. No committed keystore required.
   // -------------------------------------------------------------------------
-  val uploadKeystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-  val uploadKeystore = file(uploadKeystorePath)
-  val storePassword = System.getenv("STORE_PASSWORD")
-  val keyPassword = System.getenv("KEY_PASSWORD")
-  val haveUploadCredentials = uploadKeystore.exists() && storePassword != null && keyPassword != null
-  val haveFallbackKeystore = keystoreFile.exists()
-
   signingConfigs {
-    if (haveUploadCredentials) {
-      create("release") {
-        storeFile = uploadKeystore
-        storePassword = storePassword
-        keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
-        keyPassword = keyPassword
-      }
-    } else if (haveFallbackKeystore) {
-      logger.warn(
-        "No upload keystore/credentials found; signing 'release' with the debug " +
-          "keystore at $uploadKeystorePath. This is for CI smoke builds only and " +
-          "will be rejected by Google Play."
-      )
-      create("release") {
-        storeFile = keystoreFile
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
-      }
+    create("release") {
+      storeFile = keystoreFile
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
     }
   }
 
   buildTypes {
     release {
-      isCrunchPngs = false
-      isMinifyEnabled = true
-      isShrinkResources = true
+      isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      // Null when no keystore is configured => unsigned AAB, sign later.
-      signingConfig = signingConfigs.findByName("release")
-      if (signingConfig == null) {
-        logger.lifecycle(
-          "Release build will be UNSIGNED: provide KEYSTORE_PATH, STORE_PASSWORD, " +
-            "KEY_ALIAS and KEY_PASSWORD (or drop my-upload-key.jks next to " +
-            "settings.gradle.kts) to produce a signed artefact."
-        )
-      }
+      signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      // Intentionally no signingConfig: AGP applies its own debug signing and
-      // generates ~/.android/debug.keystore on demand.
     }
   }
   compileOptions {
@@ -110,19 +77,6 @@ android {
   testOptions {
     unitTests {
       isIncludeAndroidResources = true
-      // Let CI opt into Roborazzi screenshot verification / comparison without
-      // the default record mode overwriting the committed golden images:
-      //   ./gradlew test -Droborazzi.test.verify=true
-      all {
-        systemProperty(
-          "roborazzi.test.verify",
-          providers.systemProperty("roborazzi.test.verify").getOrElse("false"),
-        )
-        systemProperty(
-          "roborazzi.test.compare",
-          providers.systemProperty("roborazzi.test.compare").getOrElse("false"),
-        )
-      }
     }
   }
 }

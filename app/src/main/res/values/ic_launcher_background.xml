@@ -2,6 +2,6 @@
 <resources>
     <!-- Flat fallback for the adaptive-icon backdrop; the live background is
          the gradient in drawable/ic_launcher_background.xml. Both are kept in
-         sync with tools/make_icons.py --bg. -->
+         sync with tools/make_icons.py. -->
     <color name="ic_launcher_background">#064E3B</color>
 </resources>
