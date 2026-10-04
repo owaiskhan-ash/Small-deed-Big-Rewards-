@@ -1,0 +1,9 @@
+{
+  "redirects": [
+    {
+      "source": "/smalldeeds",
+      "destination": "https://play.google.com/store/apps/details?id=com.aistudio.smalldeeds.kfkjqo",
+      "permanent": false
+    }
+  ]
+}
