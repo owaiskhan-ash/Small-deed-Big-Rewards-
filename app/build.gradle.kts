@@ -25,14 +25,14 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 34
 
   defaultConfig {
     applicationId = "com.aistudio.smalldeeds.kfkjqo"
     minSdk = 24
-    targetSdk = 36
-    versionCode = 7
-    versionName = "7.0"
+    targetSdk = 34
+    versionCode = 6
+    versionName = "6.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -61,7 +61,12 @@ android {
     release {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      // Only sign the release build if a keystore is available; otherwise leave
+      // unsigned so Play App Signing can handle it (avoids failing on clean checkouts
+      // where debug.keystore.base64 secret is not provided).
+      if (keystoreFile.exists()) {
+        signingConfig = signingConfigs.getByName("release")
+      }
     }
     debug {
     }

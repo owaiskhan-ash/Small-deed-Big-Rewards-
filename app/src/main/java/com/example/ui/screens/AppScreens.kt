@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.BuildConfig
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -2307,7 +2308,7 @@ fun SettingsScreen(viewModel: HadithViewModel, activeColor: Color) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Small Deeds, Big Rewards v1.0.0",
+                    text = "Small Deeds, Big Rewards v${BuildConfig.VERSION_NAME}",
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
